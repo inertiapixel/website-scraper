@@ -147,7 +147,11 @@ export async function runWorker({ home, jobId, dispatchToken, mode, handleSignal
     process.on('exit', onExit);
   }
 
+  // Set just before the final status is written: that write releases the
+  // lease, so a later heartbeat must not report it as "lost".
+  let finalizing = false;
   const heartbeat = setInterval(() => {
+    if (finalizing) return;
     try {
       const row = store.heartbeat(jobId, token, LEASE_MS);
       if (!row) {
@@ -189,11 +193,13 @@ export async function runWorker({ home, jobId, dispatchToken, mode, handleSignal
       }
       const from = to === S.STOPPED ? S.STOPPING : S.PAUSING;
       const reason = store.getJob(jobId).status_reason;
+      finalizing = true;
       store.transition(jobId, [from], to, finishFields(to === S.STOPPED ? 'Stopped' : 'Paused', reason), { expectToken: token });
       logger.info(`${to === S.STOPPED ? 'Stopped' : 'Paused'}; wrote ${mat.pages} page(s) so far. Resume with: npm run job:resume -- ${jobId}`);
       return to;
     }
     // External termination (e.g. SIGTERM from the OS): save quickly and exit.
+    finalizing = true;
     store.transition(jobId, [S.STARTING, S.RUNNING, S.PAUSING, S.STOPPING], S.INTERRUPTED,
       finishFields('Interrupted', 'Worker received a termination signal'), { expectToken: token });
     logger.info(`Interrupted; progress saved. Resume with: npm run job:resume -- ${jobId}`);
@@ -222,6 +228,7 @@ export async function runWorker({ home, jobId, dispatchToken, mode, handleSignal
     }
     if (config.output.generateReport) await writeReport({ store, job, status: S.COMPLETED });
 
+    finalizing = true;
     const ok = store.transition(jobId, [S.RUNNING], S.COMPLETED, { ...finishFields('Completed'), completed_at: Date.now() }, { expectToken: token });
     if (!ok) {
       // A stop/pause request arrived during finalization. All work is done, so
@@ -266,6 +273,7 @@ export async function runWorker({ home, jobId, dispatchToken, mode, handleSignal
     if (finalStatus === S.INTERRUPTED) exitCode = 2;
   } catch (err) {
     logger.error(`Job failed: ${err?.stack || err}`);
+    finalizing = true;
     store.transition(jobId, [S.STARTING, S.RUNNING, S.PAUSING, S.STOPPING], S.FAILED, {
       ...finishFields('Failed', describeError(err)), last_error: describeError(err),
     }, { expectToken: token });

@@ -13,6 +13,7 @@ Topics: `nodejs` `website-scraper` `web-crawler` `playwright` `cheerio` `website
 ## Contents
 
 - [Features](#features)
+- [How it works](#how-it-works)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -46,6 +47,46 @@ Topics: `nodejs` `website-scraper` `web-crawler` `playwright` `cheerio` `website
 - **Job-based execution.** Every crawl is a durable job in SQLite with a unique ID, a configuration snapshot, counters, a persisted queue, per-job logs and a crawl report.
 - **Background workers.** Detached worker processes with lease-based ownership, heartbeats, graceful stop/pause, safe resume and stale-worker detection.
 - **Safety.** SSRF protection for both the HTTP client and the browser, path-traversal-proof output paths, bounded concurrency, per-host rate limits, timeouts, retries with exponential backoff, and secret redaction in logs.
+
+## How it works
+
+```mermaid
+flowchart TD
+    A(["npm run scrape -- URL<br/>or npm run scrape:background -- URL"]) --> B["Check the URL and settings"]
+    B --> C["Create a job<br/>job ID, settings snapshot, output folder"]
+    C --> D["Worker starts<br/>in this terminal or in the background"]
+    D --> E["Read robots.txt and sitemap.xml<br/>put the start URL in the queue"]
+    E --> Q[("Page queue<br/>saved in SQLite")]
+    Q --> F
+
+    subgraph LOOP["Crawl loop"]
+        F["Take the next page"] --> G{"Allowed?<br/>same host, robots.txt, limits"}
+        G -->|no| X["Skip it and record why"]
+        G -->|yes| H["Download the page<br/>every redirect is checked"]
+        H --> I["Render in Chromium<br/>run JavaScript, scroll lazy images"]
+        I --> J["Find links and assets"]
+        J -->|CSS, JS, images, fonts| K["Download assets<br/>max 1 MB, no audio or video"]
+        K -->|files referenced by CSS| K
+        K --> MORE{"More pages<br/>in the queue?"}
+        X --> MORE
+    end
+
+    J -->|new internal links| Q
+    MORE -->|yes| F
+    MORE -->|no| L["Rewrite links to point to the local files"]
+    L --> M["Write crawl-report.json"]
+    M --> N(["Done: open index.html"])
+
+    STOP(["Ctrl+C or job:stop<br/>at any time"]) -.-> S["Save progress<br/>and a partial copy"]
+    S -.->|"job:resume<br/>continues where it stopped"| Q
+
+    classDef done fill:#e8f5e9,stroke:#43a047
+    classDef skip fill:#f6f6f6,stroke:#bbb,color:#666
+    classDef stop fill:#fff3e0,stroke:#fb8c00
+    class N done
+    class X skip
+    class STOP,S stop
+```
 
 ## Requirements
 
@@ -198,6 +239,8 @@ By default only the **exact hostname** of the starting URL is crawled. For `http
 - pass partial overlay files with `--config my-site.json` (deep-merged; arrays replace), and
 - override individual values on the command line.
 
+For sites with tens of thousands of pages, start from [`examples/large-site.json`](examples/large-site.json) (`--config examples/large-site.json`): it raises the crawl-trap limits that would otherwise cut a large site short.
+
 Run `npm run config:check` to validate and print the effective configuration. When a job is created, the effective configuration is **snapshotted into the job**. Later edits never change an existing job, including on resume.
 
 **Path patterns** (`includePaths`, `excludePaths`, `excludedUrlPatterns`):
@@ -346,12 +389,24 @@ Job state lives in `.website-scraper/` (`jobs.db`, `jobs/<id>/worker.log`, `jobs
 
 ## Job lifecycle
 
-```text
-QUEUED ─► STARTING ─► RUNNING ─► COMPLETED
-                         ├─► PAUSING ─► PAUSED ───┐
-                         ├─► STOPPING ─► STOPPED ─┤
-                         ├─► FAILED ──────────────┼─► (resume) QUEUED
-any active state ───────►└─ INTERRUPTED ──────────┘
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> QUEUED
+    QUEUED --> STARTING: worker claims job
+    STARTING --> RUNNING
+    RUNNING --> COMPLETED: all work done
+    RUNNING --> PAUSING: job:pause
+    PAUSING --> PAUSED
+    RUNNING --> STOPPING: job:stop or Ctrl+C
+    STOPPING --> STOPPED
+    RUNNING --> FAILED: fatal error
+    RUNNING --> INTERRUPTED: worker killed or crashed
+    PAUSED --> QUEUED: job:resume
+    STOPPED --> QUEUED: job:resume
+    FAILED --> QUEUED: job:resume
+    INTERRUPTED --> QUEUED: job:resume
+    COMPLETED --> [*]
 ```
 
 | Status | Meaning |
@@ -530,4 +585,9 @@ Please report security issues privately to the maintainers rather than in a publ
 
 ## License
 
-No open-source license has been selected for this project yet, and no license file is included. Until the maintainer adds one, no license is granted beyond what applicable law and GitHub's terms allow.
+Website Scraper is **free** and open-source under the **MIT License**.  
+See the full license [here](LICENSE).
+
+The license covers this tool's source code only, not the content of websites you download with it (see [Legal, copyright and licensing](#legal-copyright-and-licensing)).
+
+**Crafted in India by [InertiaPixel](https://www.inertiapixel.com/)**

@@ -1,0 +1,14 @@
+{
+  "crawler": {
+    "maxPages": 50000,
+    "concurrency": 3,
+    "requestDelayMs": 300,
+    "sitemap": { "maxUrls": 60000 },
+    "trapProtection": {
+      "maxUrlsPerPattern": null,
+      "maxQueryVariantsPerPath": 200,
+      "maxDiscoveredUrls": 500000
+    },
+    "blockBrowserResourceTypes": ["media", "image", "font"]
+  }
+}

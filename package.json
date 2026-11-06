@@ -4,7 +4,11 @@
   "description": "A configurable Node.js website crawler and downloader that captures publicly accessible websites for offline browsing, design reference, and development.",
   "type": "module",
   "private": true,
-  "author": "Inertia Pixel",
+  "author": {
+    "name": "Inertia Pixel",
+    "url": "https://www.inertiapixel.com/"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/inertiapixel/website-scraper.git"

@@ -184,6 +184,9 @@ describe('background jobs', () => {
     for (let i = 0; i < PAGES; i++) assert.ok(fs.existsSync(path.join(snap.outputDir, 'p', String(i), 'index.html')));
     const follow = await cli(['logs', job.id, '--follow']);
     assert.match(follow.stdout, /-- job COMPLETED --/);
+    const log = fs.readFileSync(snap.logPath, 'utf8');
+    assert.doesNotMatch(log, /no longer holds the job lease/, 'finishing must not look like a lost lease');
+    assert.doesNotMatch(log, /\[ERROR\]/);
   });
 
   test('a killed worker is detected as stale and the job can be resumed', async () => {

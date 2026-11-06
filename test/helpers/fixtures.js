@@ -102,8 +102,16 @@ export function loopbackResolver(hosts) {
   return (hostname) => (set.has(hostname) ? [{ address: '127.0.0.1', family: 4 }] : null);
 }
 
+const createdDirs = [];
+process.on('exit', () => {
+  for (const d of createdDirs) fs.rmSync(d, { recursive: true, force: true });
+});
+
+/** Temporary directory, removed automatically when the test process exits. */
 export function tempDir(prefix = 'ws-test-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  createdDirs.push(dir);
+  return dir;
 }
 
 /** Minimal valid binary headers used by sniffing tests. */
