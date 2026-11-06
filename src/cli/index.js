@@ -3,6 +3,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { JobStore } from '../jobs/store.js';
 import { JobStatus, FINAL_STATUSES } from '../jobs/states.js';
 import {
@@ -62,7 +63,7 @@ async function cmdScrape(argv) {
     recoverStaleJobs(store);
     const job = createJob(store, { config, mode, home });
     const token = dispatch(store, job.id, mode);
-    if (mode === 'BACKGROUND') return await startBackground(store, job, token, home, values.json);
+    if (mode === 'BACKGROUND') return await startBackground(store, job, token, home, backgroundOptions(values));
 
     out(`${TITLE}\n`);
     out(`Job ID:  ${job.id}`);
@@ -82,32 +83,80 @@ async function runForeground(jobId, token, home) {
   const result = await runWorker({ home, jobId, dispatchToken: token, mode: 'FOREGROUND' });
   const store = JobStore.open(home);
   try {
-    const snap = jobSnapshot(store, store.getJob(jobId));
     out('');
-    out(`${TITLE}: job ${snap.status}${snap.statusReason ? ` (${snap.statusReason})` : ''}`);
-    out(`Pages:  ${snap.pages.completed} saved, ${snap.pages.failed} failed, ${snap.pages.skipped} skipped`);
-    out(`Assets: ${snap.assets.downloaded} downloaded (${formatBytes(snap.assets.bytes)}), ${snap.assets.skipped} skipped, ${snap.assets.failed} failed`);
-    out(`Time:   ${formatDuration(snap.elapsedMs)}`);
-    out(`Output: ${displayPath(snap.outputDir, { dir: true })}`);
-    if (snap.entryPage) out(`Open:   ${displayPath(snap.entryPage)}`);
-    if (snap.lastError && snap.status !== JobStatus.COMPLETED) out(`Error:  ${snap.lastError}`);
-    if ([JobStatus.STOPPED, JobStatus.PAUSED, JobStatus.INTERRUPTED, JobStatus.FAILED].includes(snap.status)) {
-      out(`Resume: npm run job:resume -- ${jobId}`);
-    }
+    printResult(jobSnapshot(store, store.getJob(jobId)));
   } finally {
     store.close();
   }
   return result.exitCode;
 }
 
-async function startBackground(store, job, token, home, json) {
+const RESUMABLE = [JobStatus.STOPPED, JobStatus.PAUSED, JobStatus.INTERRUPTED, JobStatus.FAILED];
+
+/** Final summary of a job, printed when it ends (foreground, --follow, logs --follow). */
+function printResult(snap) {
+  out(`${TITLE}: job ${snap.status}${snap.statusReason ? ` (${snap.statusReason})` : ''}`);
+  out(`Pages:  ${snap.pages.completed} saved, ${snap.pages.failed} failed, ${snap.pages.skipped} skipped`);
+  out(`Assets: ${snap.assets.downloaded} downloaded (${formatBytes(snap.assets.bytes)}), ${snap.assets.skipped} skipped, ${snap.assets.failed} failed`);
+  out(`Time:   ${formatDuration(snap.elapsedMs)}`);
+  out(`Output: ${displayPath(snap.outputDir, { dir: true })}`);
+  if (snap.entryPage) out(`Open:   ${displayPath(snap.entryPage)}`);
+  if (snap.lastError && snap.status !== JobStatus.COMPLETED) out(`Error:  ${snap.lastError}`);
+  out(`Log:    ${displayPath(snap.logPath)}`);
+  if (RESUMABLE.includes(snap.status)) out(`Resume: npm run job:resume -- ${snap.id}`);
+}
+
+function exitCodeFor(status) {
+  if (status === JobStatus.FAILED) return 1;
+  if (status === JobStatus.INTERRUPTED) return 2;
+  return 0;
+}
+
+function backgroundOptions(values) {
+  return { json: values.json, follow: values.follow, notify: !values['no-notify'] };
+}
+
+/**
+ * Terminal device of this CLI (e.g. /dev/ttys003), so the detached worker
+ * can print a one-time result notice there when the job ends.
+ */
+function currentTty() {
+  if (process.platform === 'win32' || !process.stdin.isTTY || !process.stdout.isTTY) return null;
+  try {
+    const tty = execFileSync('tty', [], { stdio: ['inherit', 'pipe', 'ignore'], encoding: 'utf8', timeout: 2000 }).trim();
+    return /^\/dev\/(?:ttys?\d+|pts\/\d+)$/.test(tty) ? tty : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Wait briefly after start: until the first page is saved, the job ends, or `maxMs` passes. */
+async function waitForEarlyOutcome(store, jobId, maxMs = 5000) {
+  const end = Date.now() + maxMs;
+  for (;;) {
+    const job = store.getJob(jobId);
+    if (FINAL_STATUSES.includes(job.status)) return job;
+    if (store.startPage(jobId)?.status === 'COMPLETED' || Date.now() > end) return job;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+async function startBackground(store, job, token, home, { json = false, follow = false, notify = true } = {}) {
+  const notifyTty = notify && !json ? currentTty() : null;
   const child = await spawnBackgroundWorker({ job, home, dispatchToken: token });
-  const { job: current, claimed, exited } = await waitForClaim(store, job.id, { exitCode: child.exitCode });
+  const { job: claimedJob, claimed, exited } = await waitForClaim(store, job.id, { exitCode: child.exitCode });
+  const current = claimed ? await waitForEarlyOutcome(store, job.id) : claimedJob;
   if (json) {
     out(JSON.stringify({ id: job.id, url: job.start_url, status: current.status, mode: 'BACKGROUND', output: job.output_dir, log: job.log_path, workerPid: child.pid }, null, 2));
-    return claimed || current.status !== JobStatus.QUEUED ? 0 : 1;
+    return FINAL_STATUSES.includes(current.status) ? exitCodeFor(current.status) : (claimed ? 0 : 1);
   }
   out(`${TITLE}\n`);
+  if (FINAL_STATUSES.includes(current.status)) {
+    // The job already ended (e.g. the site refused the first request): say so now.
+    out(`Background job ${job.id} finished immediately.\n`);
+    printResult(jobSnapshot(store, current));
+    return exitCodeFor(current.status);
+  }
   if (!claimed && current.status === JobStatus.QUEUED) {
     err(exited != null
       ? `The background worker exited before starting (code ${exited}). See the log: ${displayPath(job.log_path)}`
@@ -130,7 +179,86 @@ async function startBackground(store, job, token, home, json) {
   out('');
   out('Stop:');
   out(`npm run job:stop -- ${job.id}`);
+  if (follow) {
+    out('\nFollowing progress (Ctrl+C stops following; the job keeps running)...\n');
+    return followJob(job.id, { offset: 0, notifyTty });
+  }
+  if (notifyTty) {
+    if (store.setNotifyTtyIfUnfinished(job.id, notifyTty)) {
+      out('\nThe result will be printed in this terminal when the job finishes.');
+    } else {
+      out('');
+      printResult(jobSnapshot(store, store.getJob(job.id))); // it ended just now
+      return exitCodeFor(store.getJob(job.id).status);
+    }
+  }
   return claimed || current.status !== JobStatus.QUEUED ? 0 : 1;
+}
+
+/**
+ * Stream a job's log until the job ends, then print its result. Ctrl+C only
+ * stops following; a background job keeps running.
+ */
+async function followJob(jobId, { offset = 0, notifyTty = null } = {}) {
+  const s0 = openStore();
+  const job = getJobOrThrow(s0, jobId);
+  s0.close();
+  let detached = false;
+  const onInt = () => {
+    detached = true;
+  };
+  process.on('SIGINT', onInt);
+  try {
+    let idleSinceFinal = null;
+    for (;;) {
+      if (detached) {
+        const s1 = openStore();
+        try {
+          if (notifyTty && !s1.setNotifyTtyIfUnfinished(jobId, notifyTty)) {
+            out('');
+            printResult(jobSnapshot(s1, s1.getJob(jobId)));
+            return exitCodeFor(s1.getJob(jobId).status);
+          }
+        } finally {
+          s1.close();
+        }
+        out(`\nStopped following. The job keeps running in the background: npm run job:status -- ${jobId}`);
+        if (notifyTty) out('The result will be printed in this terminal when the job finishes.');
+        return 0;
+      }
+      if (fs.existsSync(job.log_path)) {
+        const size = fs.statSync(job.log_path).size;
+        if (size > offset) {
+          const fd = fs.openSync(job.log_path, 'r');
+          const buf = Buffer.alloc(size - offset);
+          fs.readSync(fd, buf, 0, buf.length, offset);
+          fs.closeSync(fd);
+          process.stdout.write(buf.toString('utf8'));
+          offset = size;
+          idleSinceFinal = null;
+          continue;
+        }
+      }
+      const s = openStore();
+      try {
+        recoverStaleJobs(s);
+        const cur = s.getJob(jobId);
+        if (FINAL_STATUSES.includes(cur.status)) {
+          idleSinceFinal ??= Date.now();
+          if (Date.now() - idleSinceFinal > 1500) {
+            out(`-- job ${cur.status} --\n`);
+            printResult(jobSnapshot(s, cur));
+            return exitCodeFor(cur.status);
+          }
+        }
+      } finally {
+        s.close();
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } finally {
+    process.off('SIGINT', onInt);
+  }
 }
 
 // ---- jobs / status / logs -------------------------------------------------------
@@ -236,39 +364,7 @@ async function cmdLogs(argv) {
     }
   }
   if (!values.follow) return 0;
-
-  let idleSinceFinal = null;
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 500));
-    if (fs.existsSync(job.log_path)) {
-      const size = fs.statSync(job.log_path).size;
-      if (size > offset) {
-        const fd = fs.openSync(job.log_path, 'r');
-        const buf = Buffer.alloc(size - offset);
-        fs.readSync(fd, buf, 0, buf.length, offset);
-        fs.closeSync(fd);
-        process.stdout.write(buf.toString('utf8'));
-        offset = size;
-        idleSinceFinal = null;
-        continue;
-      }
-    }
-    const s = openStore();
-    let status;
-    try {
-      recoverStaleJobs(s);
-      status = s.getJob(id).status;
-    } finally {
-      s.close();
-    }
-    if (FINAL_STATUSES.includes(status)) {
-      idleSinceFinal ??= Date.now();
-      if (Date.now() - idleSinceFinal > 1500) {
-        out(`-- job ${status} --`);
-        return 0;
-      }
-    }
-  }
+  return followJob(id, { offset });
 }
 
 // ---- stop / pause / resume ---------------------------------------------------------
@@ -317,7 +413,8 @@ async function cmdPause(argv) {
 
 async function cmdResume(argv) {
   const { values, positionals } = parse(argv, {
-    foreground: { type: 'boolean' }, 'retry-failed': { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    foreground: { type: 'boolean' }, 'retry-failed': { type: 'boolean' }, json: { type: 'boolean' },
+    follow: { type: 'boolean', short: 'f' }, 'no-notify': { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   });
   if (values.help) {
     out(COMMAND_HELP.resume);
@@ -337,7 +434,7 @@ async function cmdResume(argv) {
         `${remaining.pages} page(s) and ${remaining.assets} asset(s) remaining.`);
       out('The job keeps its original configuration snapshot.\n');
     }
-    if (mode === 'BACKGROUND') return await startBackground(store, job, token, home, values.json);
+    if (mode === 'BACKGROUND') return await startBackground(store, job, token, home, backgroundOptions(values));
     store.close();
     return await runForeground(id, token, home);
   } finally {

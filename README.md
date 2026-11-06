@@ -129,7 +129,10 @@ npm run scrape -- https://example.com
 # Start a background job and return immediately
 npm run scrape:background -- https://example.com
 
-# Follow it
+# ...or start it in the background and watch live progress until it ends
+npm run scrape:background -- https://example.com --follow
+
+# Check on jobs
 npm run jobs
 npm run job:status -- <JOB_ID>
 npm run job:logs -- <JOB_ID> --follow
@@ -156,7 +159,22 @@ npm run job:status -- job_20261106_093012_3f9a1c2e
 
 View logs:
 npm run job:logs -- job_20261106_093012_3f9a1c2e
+
+Stop:
+npm run job:stop -- job_20261106_093012_3f9a1c2e
+
+The result will be printed in this terminal when the job finishes.
 ```
+
+When the job ends, its result appears in that same terminal, whether it passed or failed:
+
+```text
+[Website Scraper] Job job_20261106_093012_3f9a1c2e COMPLETED in 12m 4s
+  https://example.com/  842 page(s) saved, 3 failed, 41 skipped; 2310 asset(s) downloaded
+  Open: scraped-websites/example.com/job_20261106_093012_3f9a1c2e/index.html
+```
+
+If the job fails within its first seconds (for example, the site refuses automated requests with HTTP 403), the command prints the failure straight away instead of `Status: RUNNING`.
 
 > When using npm scripts, put options after `--` so npm passes them through:
 > `npm run scrape -- https://example.com --max-pages 50`.
@@ -173,7 +191,7 @@ npm run job:logs -- job_20261106_093012_3f9a1c2e
 | `npm run job:logs -- <JOB_ID>` | `logs <id> [--follow] [--lines N] [--all]` | Timestamped job log |
 | `npm run job:stop -- <JOB_ID>` | `stop <id> [--timeout S] [--no-wait] [--force]` | Graceful stop (writes the partial output and report) |
 | `npm run job:pause -- <JOB_ID>` | `pause <id>` | Pause a running job |
-| `npm run job:resume -- <JOB_ID>` | `resume <id> [--foreground] [--retry-failed]` | Continue a paused, stopped, interrupted or failed job |
+| `npm run job:resume -- <JOB_ID>` | `resume <id> [--foreground] [--follow] [--retry-failed]` | Continue a paused, stopped, interrupted or failed job |
 | `npm run config:check` | `config [options]` | Validate and print the effective configuration |
 | `npm run help` | `help [command]` | Help (for example `npm run help -- scrape`) |
 
@@ -184,6 +202,8 @@ Options override `scraper.config.json` for one job only.
 | Option | Config key |
 | --- | --- |
 | `-b, --background` | run in a detached worker |
+| `-f, --follow` | (background) show live progress and the final result; Ctrl+C stops following, the job keeps running |
+| `--no-notify` | (background) don't print the result in this terminal when the job ends |
 | `-c, --config <file>` | merge a JSON overlay file (repeatable) |
 | `--max-depth <n\|unlimited>` | `crawler.maxDepth` |
 | `--max-pages <n\|unlimited>` | `crawler.maxPages` |
@@ -425,6 +445,7 @@ Every transition is a compare-and-set update in SQLite, so the CLI and a worker 
 ## Background workers
 
 - `scrape:background` creates the job, spawns a **detached Node.js process** (`bin/website-scraper-worker.js`), waits until the worker has claimed the job, and returns.
+- **You always see the result in the terminal you started from.** If the job ends within its first seconds (for example, the site answers HTTP 403), the command prints the failure and exits with code 1 instead of "RUNNING". Otherwise, when the job finishes or fails later, a short result notice (status, page counts, and the `index.html` to open or the reason it failed) is printed in that terminal. Use `--follow` to watch live progress instead, or `--no-notify` to turn the notice off.
 - The worker runs in its own session and keeps running after the terminal that started it closes. Its stdout/stderr go to the job log: `.website-scraper/jobs/<id>/worker.log`.
 - **No duplicate workers.** A job can only be claimed with a single-use dispatch token and an atomic database lease. A second worker (or a second `resume`) for the same job is refused. The PID is written by the worker itself when it claims the lease, which avoids PID-file startup races.
 - **Safe signalling.** Before `stop`/`pause` sends a signal, the PID is verified: the process must be alive, its start time must match the one the worker recorded, and (for background workers) its command line must be the worker for that job. A reused PID is never signalled. Stop and pause also work without signals: the worker polls the job status with its heartbeat.

@@ -9,6 +9,7 @@ import { JobStatus as S, TRANSITIONS, canTransition, predecessorsOf } from '../.
 import { createJob, dispatch, recoverStaleJobs, prepareResume, stopJob } from '../../src/jobs/service.js';
 import { verifyWorker, isPidAlive, currentProcessStartedAt } from '../../src/jobs/process.js';
 import { StateError, UsageError } from '../../src/util/errors.js';
+import { buildNotice, notifyTerminal } from '../../src/jobs/notify.js';
 import { loadConfig } from '../../src/config/load.js';
 import { tempDir } from '../helpers/fixtures.js';
 
@@ -138,6 +139,21 @@ describe('job store', () => {
     const done = make();
     store.db.prepare("UPDATE jobs SET status = 'COMPLETED' WHERE id = ?").run(done.id);
     assert.throws(() => prepareResume(store, done.id, { mode: 'BACKGROUND' }), /already COMPLETED/);
+    store.close();
+  });
+
+  test('the end-of-job notice is only written to terminal devices', () => {
+    const { store, make, home } = setup();
+    const job = make();
+    store.db.prepare("UPDATE jobs SET status = 'FAILED', status_reason = 'No pages were captured' WHERE id = ?").run(job.id);
+    const text = buildNotice(store, job.id);
+    assert.match(text, new RegExp(`\\[Website Scraper\\] Job ${job.id} FAILED: No pages were captured`));
+    assert.match(text, /npm run job:resume --/);
+    const file = path.join(home, 'not-a-terminal.txt');
+    assert.equal(notifyTerminal(file, text), false);
+    assert.equal(notifyTerminal('/dev/../etc/passwd', text), false);
+    assert.equal(fs.existsSync(file), false, 'never writes ordinary files');
+    assert.equal(store.setNotifyTtyIfUnfinished(job.id, '/dev/ttys001'), false, 'finished jobs are not registered');
     store.close();
   });
 

@@ -241,7 +241,7 @@ export function prepareResume(store, jobId, { mode, retryFailed = false }) {
   const token = createToken();
   const ok = store.tx(() => {
     if (!store.transition(jobId, [job.status], S.QUEUED, {
-      dispatch_token: token, dispatched_at: Date.now(), mode, status_reason: `Resumed from ${job.status}`,
+      dispatch_token: token, dispatched_at: Date.now(), mode, status_reason: `Resumed from ${job.status}`, notify_tty: null,
       phase: null, current_activity: 'Queued for resume', completed_at: null,
     })) return false;
     if (retryFailed) store.requeueFailed(jobId);

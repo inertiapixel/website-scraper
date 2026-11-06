@@ -14,7 +14,7 @@ import { JobStatus, PageStatus, AssetStatus, canTransition } from './states.js';
 import { StateError } from '../util/errors.js';
 import { pathKey, alternatePath, collisionPath } from '../output/paths.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const MIGRATION_1 = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -123,7 +123,7 @@ CREATE INDEX IF NOT EXISTS local_paths_owner ON local_paths(job_id, owner);
 const JOB_COLUMNS = new Set([
   'status', 'mode', 'updated_at', 'started_at', 'run_started_at', 'completed_at', 'run_count', 'dispatch_token',
   'dispatched_at', 'worker_token', 'worker_pid', 'worker_host', 'worker_started_at', 'heartbeat_at',
-  'lease_expires_at', 'phase', 'seeded', 'current_activity', 'last_error', 'status_reason', 'unrecorded_urls',
+  'lease_expires_at', 'phase', 'seeded', 'current_activity', 'last_error', 'status_reason', 'unrecorded_urls', 'notify_tty',
 ]);
 const PAGE_COLUMNS = new Set([
   'status', 'final_url', 'http_status', 'content_type', 'local_path', 'attempts', 'next_attempt_at',
@@ -163,10 +163,12 @@ export class JobStore {
     if (version > SCHEMA_VERSION) {
       throw new Error(`Job database ${this.dbPath} was created by a newer version (schema ${version})`);
     }
-    if (version < 1) {
-      this.db.exec(MIGRATION_1);
-      this.db.pragma(`user_version = ${SCHEMA_VERSION}`);
+    if (version < 1) this.db.exec(MIGRATION_1);
+    if (version < 2) {
+      // Terminal that should receive the end-of-job notice (background jobs).
+      this.db.exec('ALTER TABLE jobs ADD COLUMN notify_tty TEXT');
     }
+    if (version < SCHEMA_VERSION) this.db.pragma(`user_version = ${SCHEMA_VERSION}`);
   }
 
   #stmt(sql) {
@@ -260,6 +262,16 @@ export class JobStore {
       WHERE id = @id AND status = 'QUEUED' AND dispatch_token = @dispatchToken
     `).run({ id, dispatchToken, workerToken, pid, host, processStartedAt, now, lease: now + leaseMs });
     return res.changes === 1 ? this.getJob(id) : null;
+  }
+
+  /**
+   * Ask the worker to print its result on `tty` when the job ends. Applied
+   * only while the job is still unfinished; returns false if it has already
+   * ended (the caller should then print the result itself).
+   */
+  setNotifyTtyIfUnfinished(id, tty) {
+    return this.#stmt(`UPDATE jobs SET notify_tty = ? WHERE id = ?
+      AND status NOT IN ('COMPLETED', 'STOPPED', 'FAILED', 'PAUSED', 'INTERRUPTED')`).run(tty, id).changes === 1;
   }
 
   /** Extend the lease. Returns the current job row, or null if the lease was lost. */

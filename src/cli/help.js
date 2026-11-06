@@ -32,6 +32,9 @@ directory and a snapshot of the effective configuration.
 
 Options (override scraper.config.json for this job only):
   -b, --background              Run in a detached background worker
+  -f, --follow                  (background) show live progress and the final result;
+                                Ctrl+C stops following, the job keeps running
+      --no-notify               (background) do not print the result in this terminal when the job ends
   -c, --config <file>           Merge a JSON configuration overlay (repeatable)
       --max-depth <n|unlimited> Maximum link depth (start page = 0)
       --max-pages <n|unlimited> Maximum number of pages to crawl
@@ -81,7 +84,7 @@ not stop within the timeout (identity is verified before any signal is sent).`,
   pause: `Usage: npm run job:pause -- <JOB_ID> [--timeout <seconds>]
 
 Pause a running job. Progress is saved; continue with job:resume.`,
-  resume: `Usage: npm run job:resume -- <JOB_ID> [--foreground] [--retry-failed]
+  resume: `Usage: npm run job:resume -- <JOB_ID> [--foreground] [--follow] [--retry-failed]
 
 Continue a PAUSED, STOPPED, INTERRUPTED or FAILED job from its saved queue.
 Completed pages and downloaded assets are not fetched again. Runs in the

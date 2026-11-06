@@ -10,6 +10,8 @@ import { normalizeHostname } from '../url/normalize.js';
 
 export const SCRAPE_OPTIONS = {
   background: { type: 'boolean', short: 'b' },
+  follow: { type: 'boolean', short: 'f' },
+  'no-notify': { type: 'boolean' },
   foreground: { type: 'boolean' },
   config: { type: 'string', short: 'c', multiple: true },
   'max-depth': { type: 'string' },

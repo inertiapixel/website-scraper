@@ -65,22 +65,27 @@ async function startBackground(extra = []) {
   return { id, elapsed, output: r.stdout };
 }
 
+function baseOverlay() {
+  return {
+    crawler: { renderer: 'http', concurrency: 1, requestDelayMs: 0, retries: 0, sitemap: { enabled: false } },
+    download: { requestDelayMs: 0 },
+    network: { allowPrivateNetworks: true },
+    output: { baseDir: outDir },
+  };
+}
+
 before(async () => {
   const routes = {
     '/': { body: html(Array.from({ length: PAGES }, (_, i) => `<a href="/p/${i}">page ${i}</a>`).join('') + '<img src="/logo.png">') },
     '/logo.png': { type: 'image/png', body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]) },
+    '/forbidden/': { status: 403, body: 'Forbidden' },
   };
   for (let i = 0; i < PAGES; i++) routes[`/p/${i}`] = { delay: PAGE_DELAY_MS, body: html(`<h1>Page ${i}</h1><a href="/">home</a>`) };
   server = await startServer(siteHandler(routes));
   home = tempDir('ws-bg-home-');
   outDir = tempDir('ws-bg-out-');
   overlay = path.join(home, 'test-config.json');
-  fs.writeFileSync(overlay, JSON.stringify({
-    crawler: { renderer: 'http', concurrency: 1, requestDelayMs: 0, retries: 0, sitemap: { enabled: false } },
-    download: { requestDelayMs: 0 },
-    network: { allowPrivateNetworks: true },
-    output: { baseDir: outDir },
-  }));
+  fs.writeFileSync(overlay, JSON.stringify(baseOverlay()));
 });
 
 after(async () => {
@@ -221,6 +226,26 @@ describe('background jobs', () => {
     }, { what: 'completion after resume' });
     assert.equal(done.status, 'COMPLETED', done.lastError);
     assert.equal(done.pages.completed, PAGES + 1, 'original snapshot (no maxPages) still applies');
+  });
+
+  test('a background job that fails right away reports the failure immediately', async () => {
+    fs.writeFileSync(overlay, JSON.stringify(baseOverlay())); // undo the previous test's edit
+    const r = await cli(['scrape', server.url('/forbidden/'), '--background', '--config', overlay]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.stdout, /finished immediately/);
+    assert.match(r.stdout, /job FAILED \(No pages were captured: the starting page failed \(HTTP 403\)\)/);
+    assert.doesNotMatch(r.stdout, /Status: RUNNING/);
+  });
+
+  test('--follow streams progress and prints the final result', async () => {
+    const r = await cli(['scrape', server.url('/'), '--background', '--follow', '--config', overlay]);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.stdout, /Background job created successfully/);
+    assert.match(r.stdout, /Following progress/);
+    assert.match(r.stdout, /\[INFO\] Page 1: /);
+    assert.match(r.stdout, /-- job COMPLETED --/);
+    assert.match(r.stdout, /Website Scraper: job COMPLETED/);
+    assert.match(r.stdout, new RegExp(`Pages:  ${PAGES + 1} saved, 0 failed`));
   });
 
   test('help and validation errors', async () => {

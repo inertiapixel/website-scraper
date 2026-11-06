@@ -15,6 +15,7 @@ import { JobStore } from './store.js';
 import { JobStatus, ACTIVE_STATUSES, canTransition } from './states.js';
 import { currentProcessStartedAt } from './process.js';
 import { LEASE_MS, HEARTBEAT_MS } from './constants.js';
+import { buildNotice, notifyTerminal } from './notify.js';
 import { Crawler } from '../crawl/crawler.js';
 import { materialize } from '../crawl/materialize.js';
 import { writeReport } from '../output/report.js';
@@ -290,6 +291,16 @@ export async function runWorker({ home, jobId, dispatchToken, mode, handleSignal
       process.off('uncaughtException', onFatal);
       process.off('unhandledRejection', onFatal);
       process.off('exit', onExit);
+    }
+    if (mode === 'BACKGROUND' && finalStatus) {
+      try {
+        // Read after the final status was written: the CLI registers a terminal
+        // only while the job is unfinished, so exactly one side reports the result.
+        const tty = store.getJob(jobId)?.notify_tty;
+        if (tty) notifyTerminal(tty, buildNotice(store, jobId));
+      } catch {
+        /* the notice is a convenience only */
+      }
     }
     logger.close();
     store.close();
