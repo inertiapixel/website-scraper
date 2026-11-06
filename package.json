@@ -1,0 +1,55 @@
+{
+  "name": "website-scraper",
+  "version": "1.0.0",
+  "description": "A configurable Node.js website crawler and downloader that captures publicly accessible websites for offline browsing, design reference, and development.",
+  "type": "module",
+  "private": true,
+  "author": "Inertia Pixel",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/inertiapixel/website-scraper.git"
+  },
+  "homepage": "https://github.com/inertiapixel/website-scraper#readme",
+  "bugs": {
+    "url": "https://github.com/inertiapixel/website-scraper/issues"
+  },
+  "keywords": [
+    "nodejs",
+    "website-scraper",
+    "web-crawler",
+    "playwright",
+    "cheerio",
+    "website-downloader",
+    "web-archiver",
+    "offline-browsing",
+    "web-scraping"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "website-scraper": "bin/website-scraper.js"
+  },
+  "scripts": {
+    "scrape": "node bin/website-scraper.js scrape",
+    "scrape:background": "node bin/website-scraper.js scrape --background",
+    "jobs": "node bin/website-scraper.js jobs",
+    "job:status": "node bin/website-scraper.js status",
+    "job:logs": "node bin/website-scraper.js logs",
+    "job:stop": "node bin/website-scraper.js stop",
+    "job:pause": "node bin/website-scraper.js pause",
+    "job:resume": "node bin/website-scraper.js resume",
+    "config:check": "node bin/website-scraper.js config",
+    "help": "node bin/website-scraper.js help",
+    "browsers:install": "playwright install chromium",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "check": "node scripts/check.js",
+    "test:unit": "node --test \"test/unit/*.test.js\""
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cheerio": "^1.2.0",
+    "playwright": "^1.65.0",
+    "robots-parser": "^3.0.1"
+  }
+}

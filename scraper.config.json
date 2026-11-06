@@ -1,0 +1,95 @@
+{
+  "website": {
+    "startUrl": null,
+    "allowedHosts": [],
+    "excludedHosts": [],
+    "includeSubdomains": false,
+    "crawlExternalPages": false,
+    "downloadExternalAssets": true,
+    "externalAssetHosts": []
+  },
+  "crawler": {
+    "renderer": "browser",
+    "maxDepth": null,
+    "maxPages": null,
+    "concurrency": 2,
+    "requestDelayMs": 500,
+    "navigationTimeoutMs": 30000,
+    "maxPageSizeMb": 10,
+    "userAgent": "WebsiteScraper/1.0 (+https://github.com/inertiapixel/website-scraper)",
+    "respectRobotsTxt": true,
+    "maxRobotsCrawlDelayMs": 30000,
+    "retries": 2,
+    "retryBackoffMs": 1000,
+    "maxRedirects": 10,
+    "includePaths": [],
+    "excludePaths": [],
+    "ignoreTrailingSlash": true,
+    "settle": {
+      "waitUntil": "load",
+      "networkQuietMs": 500,
+      "networkQuietTimeoutMs": 5000,
+      "delayMs": 500,
+      "waitForSelector": null
+    },
+    "lazyLoad": {
+      "enabled": true,
+      "maxScrolls": 30,
+      "scrollDelayMs": 200,
+      "promoteDataAttributes": true
+    },
+    "sitemap": {
+      "enabled": true,
+      "maxUrls": 10000,
+      "maxSitemaps": 50
+    },
+    "queryParams": {
+      "mode": "keep",
+      "allow": [],
+      "strip": ["utm_*", "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "_ga", "_gl", "yclid"],
+      "sort": true
+    },
+    "trapProtection": {
+      "maxUrlLength": 2048,
+      "maxPathSegments": 20,
+      "maxRepeatedSegments": 3,
+      "maxQueryVariantsPerPath": 50,
+      "maxUrlsPerPattern": 1000,
+      "maxDiscoveredUrls": 100000
+    },
+    "blockBrowserResourceTypes": ["media"]
+  },
+  "download": {
+    "enabled": true,
+    "maxFileSizeMb": 1,
+    "concurrency": 4,
+    "requestDelayMs": 100,
+    "timeoutMs": 30000,
+    "retries": 2,
+    "retryBackoffMs": 1000,
+    "existingFiles": "skip",
+    "maxCssImportDepth": 5,
+    "includedCategories": ["stylesheet", "script", "image", "font", "document", "data", "other"],
+    "excludedExtensions": [
+      ".mp4", ".m4v", ".mov", ".avi", ".mkv", ".webm", ".mpeg", ".mpg", ".ogv", ".wmv", ".flv", ".3gp",
+      ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".wma", ".opus", ".weba", ".aiff"
+    ],
+    "excludedMimeTypes": ["video/*", "audio/*"],
+    "excludedUrlPatterns": []
+  },
+  "output": {
+    "baseDir": "scraped-websites",
+    "preserveStructure": true,
+    "rewriteUrls": true,
+    "saveRenderedHtml": true,
+    "removeScripts": false,
+    "generateReport": true,
+    "keepStaging": false
+  },
+  "network": {
+    "allowPrivateNetworks": false
+  },
+  "logging": {
+    "level": "info"
+  }
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Scraped output, job state, logs and local caches (never commit captured sites)
+scraped-websites/
+.website-scraper/
+*.log
+*.db
+*.db-wal
+*.db-shm
+
+# Local environment and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+coverage/
